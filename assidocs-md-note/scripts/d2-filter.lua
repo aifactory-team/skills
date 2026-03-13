@@ -26,8 +26,8 @@ function CodeBlock(block)
   counter = counter + 1
   local caption = block.attributes["caption"] or ("Figure " .. counter)
   local width = block.attributes["width"] or "80%"
-  local theme = block.attributes["theme"] or "4"
-  local pad = block.attributes["pad"] or "40"
+  local theme = block.attributes["theme"] or "1"
+  local pad = block.attributes["pad"] or "20"
 
   local basename = string.format("%s/d2_%03d", img_dir, counter)
   local d2_file = basename .. ".d2"

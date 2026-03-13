@@ -89,13 +89,49 @@ lang: ko
 ````markdown
 ```{.d2 caption="구성도" width=80%}
 direction: down
-a: "모듈 A" { style.fill: "#E3F2FD" }
-b: "모듈 B" { style.fill: "#FFF3E0" }
+classes: {
+  box: {
+    style.fill: "#F5F5F5"
+    style.stroke: "#9E9E9E"
+    style.border-radius: 8
+    style.font-size: 16
+  }
+}
+a: "모듈 A" { class: box }
+b: "모듈 B" { class: box }
 a -> b
 ```
 ````
 
-속성: `caption`, `width` (기본 80%), `theme` (기본 4), `pad` (기본 40).
+속성: `caption`, `width` (기본 80%), `theme` (기본 1), `pad` (기본 20).
+
+#### D2 다이어그램 디자인 원칙
+
+**미니멀 색상**: 2~3색만 사용. 무채색 기반 + 강조색 1개.
+
+```
+# 권장 색상 팔레트 (모노톤 + 블루 악센트)
+메인 배경:   "#F5F5F5"  (연한 회색)     stroke: "#9E9E9E"
+강조 배경:   "#E3F2FD"  (연한 파란)     stroke: "#64B5F6"
+헤더/타이틀: "#424242"  (진한 회색)     stroke: "#616161"
+외부/연동:   "#FAFAFA"  (거의 흰색)     stroke: "#BDBDBD"
+```
+
+**폰트 크기**: 최소 14pt. 타이틀급은 18~20pt.
+
+```d2
+style.font-size: 14   # 일반 블록 최소
+style.font-size: 18   # 컨테이너/그룹 제목
+style.font-size: 20   # 최상위 타이틀
+```
+
+**간격 축소**: `--pad 20` 사용. 블록 라벨을 짧게 유지하여 화살표 길이 최소화.
+
+**균형 잡힌 구조**:
+- `direction: down` 사용 시 같은 레벨 노드 수를 3~5개로 제한
+- 컨테이너로 관련 노드를 그룹핑하여 자연스러운 배치
+- 화살표 라벨은 2~3글자 이내 (길면 생략)
+- `classes` 블록으로 스타일 일괄 정의 (인라인 스타일 최소화)
 
 ### 테이블
 
@@ -169,9 +205,22 @@ lang: ko
 
 ```{.d2 caption="시스템 구성도" width=80%}
 direction: down
-system: "시스템" {
-  a: "모듈 A"
-  b: "모듈 B"
+classes: {
+  box: {
+    style.fill: "#F5F5F5"
+    style.stroke: "#9E9E9E"
+    style.border-radius: 8
+    style.font-size: 16
+  }
+  group: {
+    style.fill: "#FAFAFA"
+    style.stroke: "#BDBDBD"
+    style.font-size: 18
+  }
+}
+system: "시스템" { class: group
+  a: "모듈 A" { class: box }
+  b: "모듈 B" { class: box }
 }
 system.a -> system.b
 ```
