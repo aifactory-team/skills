@@ -27,7 +27,8 @@ function CodeBlock(block)
   local caption = block.attributes["caption"] or ("Figure " .. counter)
   local width = block.attributes["width"] or "80%"
   local theme = block.attributes["theme"] or "1"
-  local pad = block.attributes["pad"] or "20"
+  local pad = block.attributes["pad"] or "10"
+  local layout = block.attributes["layout"] or "elk"
 
   local basename = string.format("%s/d2_%03d", img_dir, counter)
   local d2_file = basename .. ".d2"
@@ -38,8 +39,8 @@ function CodeBlock(block)
   f:write(block.text)
   f:close()
 
-  -- Render with d2
-  local cmd = string.format("d2 --theme %s --pad %s %s %s 2>&1", theme, pad, d2_file, png_file)
+  -- Render with d2 (elk layout for tighter spacing)
+  local cmd = string.format("d2 --layout %s --theme %s --pad %s %s %s 2>&1", layout, theme, pad, d2_file, png_file)
   local handle = io.popen(cmd)
   local result = handle:read("*a")
   local success = handle:close()
