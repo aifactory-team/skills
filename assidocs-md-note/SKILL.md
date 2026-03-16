@@ -87,14 +87,14 @@ lang: ko
 ### 인라인 D2 다이어그램
 
 ````markdown
-```{.d2 caption="구성도" width=80%}
+```{.d2 caption="구성도" width=65% scale=0.7}
 direction: down
 classes: {
   box: {
     style.fill: "#F5F5F5"
     style.stroke: "#9E9E9E"
     style.border-radius: 8
-    style.font-size: 16
+    style.font-size: 14
   }
 }
 a: "모듈 A" { class: box }
@@ -103,15 +103,17 @@ a -> b
 ```
 ````
 
-속성: `caption`, `width` (기본 80%), `theme` (기본 1), `pad` (기본 10), `layout` (기본 elk).
+속성: `caption`, `width` (기본 65%), `scale` (기본 0.8), `theme` (기본 1), `pad` (기본 10), `layout` (기본 elk).
 
 #### D2 다이어그램 디자인 원칙 (필수)
 
-DOCX 삽입 시 다이어그램이 꽉 차고 균형 잡혀 보여야 합니다.
+DOCX 삽입 시 다이어그램이 페이지 내에 깔끔하게 들어가야 합니다.
 
-**레이아웃 엔진**: ELK 사용 (dagre 대비 화살표 간격 ~20% 짧음). d2-filter.lua가 자동 적용.
+**레이아웃 엔진**: ELK 사용. d2-filter.lua가 자동 적용.
 
-**미니멀 색상**: 무채색 기반 + 강조색 1개. 최대 3색.
+**스케일 제어**: `scale=0.7`이 기본 권장값. 다이어그램이 페이지를 넘기면 scale을 줄인다.
+
+**미니멀 색상**: 무채색 기반 + 강조색 1~2개. 최대 3색.
 
 ```
 메인 블록:    fill="#F5F5F5" stroke="#9E9E9E"   (연한 회색)
@@ -119,46 +121,68 @@ DOCX 삽입 시 다이어그램이 꽉 차고 균형 잡혀 보여야 합니다.
 타이틀 블록:  fill="#424242" font-color="#FFFFFF" (진한 회색 반전)
 그룹/컨테이너: fill="#FAFAFA" stroke="#E0E0E0"   (거의 흰색)
 결과 블록:    fill="#E8F5E9" stroke="#A5D6A7"    (연한 초록)
+주의 블록:    fill="#FFF3E0" stroke="#FFCC80"    (연한 주황)
+경고 블록:    fill="#FFEBEE" stroke="#EF9A9A"    (연한 빨강)
 점선 노트:    fill="#FAFAFA" stroke="#BDBDBD" stroke-dash=3 (보조 설명)
 ```
 
-**블록 크기**: `width`와 `height`를 명시하여 블록이 충분히 크게. 화살표 대비 블록 비율이 커야 균형.
+**한국어 텍스트와 블록 크기 — 핵심 규칙**:
 
+> **절대 `width`와 `height`를 classes에 고정하지 않는다.**
+> D2는 한국어 텍스트 폭을 정확히 계산하지 못해, 고정 width보다 텍스트가 길면 **텍스트가 박스 바깥으로 나간다.**
+> 항상 D2가 텍스트 길이에 맞게 **자동 크기 조절**하도록 width/height를 생략한다.
+
+잘못된 예:
 ```d2
-# 블록 크기 기준 (classes에 정의)
-일반 블록:  width=200~300, height=42~50
-넓은 블록:  width=350~400, height=50~55
-타이틀:     width=350~400, height=50
+# BAD — 한국어가 박스를 넘칠 수 있음
+classes: {
+  box: {
+    width: 200
+    height: 42
+  }
+}
 ```
 
-**폰트 크기**: 최소 16pt. DOCX에서 축소되므로 넉넉하게.
+올바른 예:
+```d2
+# GOOD — D2가 자동 크기 조절
+classes: {
+  box: {
+    style.border-radius: 8
+    style.font-size: 14
+    style.bold: true
+    style.fill: "#F5F5F5"
+    style.stroke: "#9E9E9E"
+  }
+}
+```
+
+**폰트 크기**: 12~14pt 권장. DOCX에서 scale이 적용되므로 너무 크게 잡지 않는다.
 
 ```d2
-style.font-size: 16   # 일반 블록
-style.font-size: 18   # 컨테이너/그룹 제목
-style.font-size: 20~22 # 최상위 타이틀
+style.font-size: 12   # 일반 블록 (그리드 내 항목)
+style.font-size: 14   # 강조 블록, 단독 노드
+style.font-size: 16   # 최상위 타이틀
 ```
+
+**페이지 넘김 방지 전략**:
+
+1. 세로 체인이 5단 이상이면 `direction: right`로 가로 배치
+2. 항목이 많으면 `grid-columns: 2~3`으로 격자 배치
+3. `scale=0.6~0.7`로 전체 크기 축소
+4. 폰트 크기를 11~12로 줄이기
+5. 텍스트를 `\n`으로 줄바꿈하여 2줄로 만들면 가로 폭 절약
+
+**D2 특수문자 주의**:
+
+- `$` 기호 사용 금지 — D2가 substitution 문법으로 인식. `$100` 대신 `100 USD` 또는 `100달러` 사용
+- 노드 이름에 D2 예약어 금지: `top`, `bottom`, `left`, `right`, `center`, `classes`, `label`, `style`, `shape`, `icon`, `tooltip`, `link`, `near`, `width`, `height`, `grid-rows`, `grid-columns`, `grid-gap`
 
 **간격 축소 핵심 전략**:
 - `grid-columns: N` 으로 수평 블록 배치 (화살표 없이 그룹핑)
 - 화살표 라벨은 2~3글자 이내 (길면 생략)
-- 블록 라벨에 `\n` 줄바꿈으로 2줄 구성 → 블록이 커져 비율 개선
+- 블록 라벨에 `\n` 줄바꿈으로 2줄 구성
 - `classes` 블록으로 스타일 일괄 정의 (인라인 반복 금지)
-
-**점선 노트 박스**: 여백을 설명으로 활용. `--` (양방향 연결)로 메인 블록에 연결.
-
-```d2
-note1: "보조 설명 텍스트" {
-  style.stroke-dash: 3
-  style.fill: "#FAFAFA"
-  style.stroke: "#BDBDBD"
-  style.font-size: 14
-  style.font-color: "#616161"
-}
-main_block -- note1: { style.stroke-dash: 3; style.stroke: "#BDBDBD" }
-```
-
-**D2 예약어 주의**: 노드 이름으로 `top`, `bottom`, `left`, `right`, `center`, `classes`, `label`, `style`, `shape`, `icon`, `tooltip`, `link`, `near`, `width`, `height`, `grid-rows`, `grid-columns`, `grid-gap` 사용 금지. `top` 대신 `header`, `platform` 등 사용.
 
 **D2 다이어그램 기본 템플릿**:
 
@@ -167,34 +191,30 @@ direction: down
 classes: {
   title: {
     style.border-radius: 10
-    style.font-size: 22
+    style.font-size: 16
     style.bold: true
     style.fill: "#424242"
     style.font-color: "#FFFFFF"
-    width: 360
-    height: 50
   }
   box: {
     style.border-radius: 8
-    style.font-size: 16
+    style.font-size: 14
     style.bold: true
-    width: 200
-    height: 42
+    style.fill: "#F5F5F5"
+    style.stroke: "#9E9E9E"
   }
   accent: {
     style.border-radius: 8
-    style.font-size: 16
+    style.font-size: 14
     style.bold: true
     style.fill: "#E3F2FD"
     style.stroke: "#90CAF9"
-    width: 200
-    height: 42
   }
   group: {
     style.fill: "#FAFAFA"
     style.stroke: "#E0E0E0"
     style.border-radius: 10
-    style.font-size: 15
+    style.font-size: 13
     style.bold: true
   }
   note: {
@@ -202,7 +222,7 @@ classes: {
     style.fill: "#FAFAFA"
     style.stroke: "#BDBDBD"
     style.stroke-dash: 3
-    style.font-size: 14
+    style.font-size: 12
     style.font-color: "#616161"
   }
 }
@@ -242,7 +262,7 @@ classes: {
 | 파일 | 역할 |
 |------|------|
 | `pagebreak.lua` | `\newpage` → DOCX 페이지 브레이크 (pandoc-ext 공식) |
-| `d2-filter.lua` | `.d2` 코드블록 → PNG 렌더링 후 이미지 삽입 |
+| `d2-filter.lua` | `.d2` 코드블록 → PNG 렌더링 후 이미지 삽입 (scale 지원) |
 | `full-width-tables.lua` | 테이블 페이지 전체 너비 |
 | `center_images.py` | DOCX 내 이미지/캡션 중앙정렬 후처리 |
 | `setup_reference_docx.py` | reference.docx 한국어 폰트/색상/테두리 설정 |
@@ -278,13 +298,13 @@ lang: ko
 
 본 과제는 ...
 
-```{.d2 caption="시스템 구성도" width=80%}
+```{.d2 caption="시스템 구성도" width=65% scale=0.7}
 direction: down
 classes: {
-  title: { style.border-radius: 10; style.font-size: 22; style.bold: true; style.fill: "#424242"; style.font-color: "#FFFFFF"; width: 360; height: 50 }
-  box: { style.border-radius: 8; style.font-size: 16; style.bold: true; width: 200; height: 42 }
-  accent: { style.border-radius: 8; style.font-size: 16; style.bold: true; style.fill: "#E3F2FD"; style.stroke: "#90CAF9"; width: 200; height: 42 }
-  group: { style.fill: "#FAFAFA"; style.stroke: "#E0E0E0"; style.border-radius: 10; style.font-size: 15; style.bold: true }
+  title: { style.border-radius: 10; style.font-size: 16; style.bold: true; style.fill: "#424242"; style.font-color: "#FFFFFF" }
+  box: { style.border-radius: 8; style.font-size: 14; style.bold: true }
+  accent: { style.border-radius: 8; style.font-size: 14; style.bold: true; style.fill: "#E3F2FD"; style.stroke: "#90CAF9" }
+  group: { style.fill: "#FAFAFA"; style.stroke: "#E0E0E0"; style.border-radius: 10; style.font-size: 13; style.bold: true }
 }
 header: "시스템명" { class: title }
 layer1: "처리 계층" {
