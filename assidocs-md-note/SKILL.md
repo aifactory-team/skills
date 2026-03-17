@@ -70,7 +70,7 @@ lang: ko
 #### 소제목
 ```
 
-`#`은 문서 최상위 제목에만 사용. 본문 섹션은 `##`부터.
+`#`은 사용하지 않는다. YAML frontmatter의 title이 문서 제목이 되므로 `#` 제목을 쓰면 중복된다. 본문 섹션은 `##`부터 시작.
 
 ### 페이지 나누기
 
@@ -103,7 +103,7 @@ a -> b
 ```
 ````
 
-속성: `caption`, `width` (기본 65%), `scale` (기본 0.8), `theme` (기본 1), `pad` (기본 10), `layout` (기본 elk).
+속성: `caption`, `width` (기본 65%), `scale` (기본 0.65), `theme` (기본 1), `pad` (기본 10), `layout` (기본 elk).
 
 #### D2 다이어그램 디자인 원칙 (필수)
 
@@ -282,17 +282,11 @@ classes: {
 ```markdown
 ---
 title: "기술 설계서"
-subtitle: "v1.0"
+subtitle: "세부 추진계획 v1.0"
 author: "조직명"
 date: "2026-03-13"
 lang: ko
 ---
-
-# 기술 설계서
-
-(세부 추진계획) v1.0
-
-\newpage
 
 ## 1. 개요
 

@@ -121,6 +121,56 @@ def modify_styles(styles_xml):
                 sz = ET.SubElement(rpr, f'{W}sz')
             sz.set(f'{W}val', '20')
 
+        # Title - compact spacing (reduce before/after)
+        elif style_id == 'Title':
+            ppr = style_el.find(f'{W}pPr')
+            if ppr is None:
+                ppr = ET.SubElement(style_el, f'{W}pPr')
+            spacing = ppr.find(f'{W}spacing')
+            if spacing is None:
+                spacing = ET.SubElement(ppr, f'{W}spacing')
+            spacing.set(f'{W}before', '0')
+            spacing.set(f'{W}after', '60')
+            # Remove center alignment - left align title
+            jc = ppr.find(f'{W}jc')
+            if jc is not None:
+                ppr.remove(jc)
+
+        # Subtitle - compact spacing
+        elif style_id == 'Subtitle':
+            ppr = style_el.find(f'{W}pPr')
+            if ppr is None:
+                ppr = ET.SubElement(style_el, f'{W}pPr')
+            spacing = ppr.find(f'{W}spacing')
+            if spacing is None:
+                spacing = ET.SubElement(ppr, f'{W}spacing')
+            spacing.set(f'{W}before', '0')
+            spacing.set(f'{W}after', '60')
+            jc = ppr.find(f'{W}jc')
+            if jc is not None:
+                ppr.remove(jc)
+
+        # Author/Date - compact spacing
+        elif style_id == 'Author':
+            ppr = style_el.find(f'{W}pPr')
+            if ppr is None:
+                ppr = ET.SubElement(style_el, f'{W}pPr')
+            spacing = ppr.find(f'{W}spacing')
+            if spacing is None:
+                spacing = ET.SubElement(ppr, f'{W}spacing')
+            spacing.set(f'{W}before', '0')
+            spacing.set(f'{W}after', '0')
+
+        elif style_id == 'Date':
+            ppr = style_el.find(f'{W}pPr')
+            if ppr is None:
+                ppr = ET.SubElement(style_el, f'{W}pPr')
+            spacing = ppr.find(f'{W}spacing')
+            if spacing is None:
+                spacing = ET.SubElement(ppr, f'{W}spacing')
+            spacing.set(f'{W}before', '0')
+            spacing.set(f'{W}after', '0')
+
     tree.write(styles_xml, xml_declaration=True, encoding='UTF-8')
 
 

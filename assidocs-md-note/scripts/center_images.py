@@ -43,6 +43,38 @@ def center_paragraph(para):
         jc = ET.SubElement(ppr, f'{W}jc')
     jc.set(f'{W}val', 'center')
 
+def add_table_borders(doc_xml_path):
+    """Add black borders to all tables in the document."""
+    tree = ET.parse(doc_xml_path)
+    root = tree.getroot()
+    tbl_count = 0
+
+    for tbl in root.iter(f'{W}tbl'):
+        tbl_count += 1
+        tblPr = tbl.find(f'{W}tblPr')
+        if tblPr is None:
+            tblPr = ET.SubElement(tbl, f'{W}tblPr')
+            tbl.remove(tblPr)
+            tbl.insert(0, tblPr)
+
+        # Remove existing borders
+        old_borders = tblPr.find(f'{W}tblBorders')
+        if old_borders is not None:
+            tblPr.remove(old_borders)
+
+        # Add new borders (all sides, black, single line)
+        borders = ET.SubElement(tblPr, f'{W}tblBorders')
+        for edge in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+            b = ET.SubElement(borders, f'{W}{edge}')
+            b.set(f'{W}val', 'single')
+            b.set(f'{W}sz', '4')
+            b.set(f'{W}space', '0')
+            b.set(f'{W}color', '000000')
+
+    tree.write(doc_xml_path, xml_declaration=True, encoding='UTF-8')
+    return tbl_count
+
+
 def process(doc_xml_path):
     tree = ET.parse(doc_xml_path)
     root = tree.getroot()
@@ -97,6 +129,8 @@ def main():
         z.extractall(tmp_dir)
 
     doc_xml = os.path.join(tmp_dir, 'word', 'document.xml')
+    tbl_count = add_table_borders(doc_xml)
+    print(f'Added borders to {tbl_count} tables')
     img_count, cap_count = process(doc_xml)
     print(f'Centered {img_count} image paragraphs, {cap_count} caption paragraphs')
 
