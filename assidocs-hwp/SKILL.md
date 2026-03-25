@@ -1,314 +1,302 @@
 ---
-name: hwp
-description: "HWP 5.0 한글 문서 읽기, 텍스트 추출, 새 HWP 파일 생성. 사용자가 'hwp 읽어', 'hwp 만들어', '한글 파일', '설문 추출', 'hwp 변환', '한글 문서 생성' 등을 요청할 때 사용합니다."
+name: assidocs-hwp
+description: "HWP 5.0 및 HWPX 한글 문서 읽기, 텍스트 추출, 라운드트립 쓰기, 콘텐츠 치환. 사용자가 'hwp 읽어', 'hwpx 읽어', 'hwp 만들어', '한글 파일', '설문 추출', 'hwp 변환', 'hwpx 변환', 'hwp 라운드트립', 'hwp 텍스트 치환' 등을 요청할 때 사용합니다."
 ---
 
-# HWP 5.0 한글 문서 처리 스킬
+# assidocs-hwp: HWP 5.0 / HWPX 문서 처리 스킬
 
 ## 개요
 
-HWP 5.0 형식의 한글 문서를 읽고, 텍스트를 추출하고, 테이블 셀을 수정하고, 새 HWP 파일을 생성하는 스킬입니다.
+HWP 5.0(OLE Compound File) 및 HWPX(ZIP/XML 기반) 형식의 한글 문서를 **읽기 → 파싱 → 수정 → 재조립 → 저장**하는 완전한 라운드트립을 지원합니다.
 
-## HWP 파일 구조
+## 스크립트
 
-HWP 5.0은 OLE Compound File (MS-CFB) 기반의 바이너리 포맷입니다.
+- `scripts/hwp_utils.py` — HWP 5.0 바이너리 레코드 파싱, OLE 패치, 텍스트 인코딩/디코딩
+- `scripts/hwp_roundtrip.py` — 라운드트립 엔진 (읽기 → 치환 → 저장 → 검증)
+- `scripts/hwpx_utils.py` — HWPX(ZIP/XML) 읽기, 텍스트 추출/치환, 테이블 셀 채우기, 양식 작성
 
-### 주요 스트림
-- `FileHeader` (256 bytes): 시그니처("HWP Document File"), 버전, 속성(압축/암호화 등)
-- `DocInfo`: 문서 메타데이터 (폰트, 스타일, 문단모양, 글자모양 등)
-- `BodyText/Section0..N`: 본문 텍스트 및 컨트롤 (zlib 압축)
-- `PrvText`: 미리보기 텍스트 (UTF-16LE)
-- `PrvImage`: 미리보기 이미지
-- `\x05HwpSummaryInformation`: 문서 요약 정보
-- `Scripts/`: JScript
-- `DocOptions/`: 연결 문서 등
+## 핵심 API
 
-### 레코드 구조
-각 스트림(DocInfo, BodyText)은 연속된 레코드로 구성됩니다:
-```
-Header (4 bytes): tag_id(10bit) | level(10bit) | size(12bit)
-  - size == 0xFFF이면 다음 4바이트가 실제 크기 (확장 크기)
-Data (size bytes)
-```
+### 라운드트립 (읽기 → 저장)
 
-### 주요 Tag ID
-- DocInfo 영역 (HWPTAG_BEGIN=16 기준):
-  - 19: FACE_NAME (폰트)
-  - 20: BORDER_FILL
-  - 21: CHAR_SHAPE (글자모양)
-  - 25: PARA_SHAPE (문단모양)
-  - 26: STYLE
-
-- BodyText 영역 (HWPTAG_BEGIN+50=66 기준):
-  - 66: PARA_HEADER (문단 헤더, 24 bytes)
-  - 67: PARA_TEXT (문단 텍스트, UTF-16LE + 제어문자)
-  - 68: PARA_CHAR_SHAPE
-  - 69: PARA_LINE_SEG
-  - 71: CTRL_HEADER (섹션정의/표/그림 등)
-  - 72: LIST_HEADER
-  - 73: PAGE_DEF
-  - 77: TABLE
-
-### PARA_TEXT 제어문자
-- 0x0001~0x0003, 0x000B, 0x000C, 0x000E~0x0012, 0x0015~0x0017: 확장 제어문자 (16바이트)
-- 0x0004: 필드 시작 (16바이트)
-- 0x0009: 탭
-- 0x000A: 줄바꿈
-- 0x000D: 문단 끝
-- 0x0018: 하이픈
-- 0x001E: 비분리공백
-
-### PARA_HEADER nchars 필드 (중요!)
-PARA_HEADER의 첫 4바이트는 `nchars` 필드이며 이중 용도입니다:
-```
-비트 0~30: 실제 글자 수
-비트 31:   테이블 셀/텍스트박스 내 마지막 문단 플래그 (0x80000000)
-```
-**테이블 셀 수정 시 반드시 bit 31을 보존해야 합니다!** 이 플래그가 누락되면 한글이 후속 레코드를 잘못 해석하여 파일이 손상됩니다.
-
-## 사용 방법
-
-### 필수 라이브러리
-```bash
-pip install olefile
-```
-
-### hwp_utils.py 위치
-`~/.claude/skills/hwp/scripts/hwp_utils.py`에 HWP 읽기/쓰기 라이브러리가 있습니다.
-
-### HWP 읽기 (텍스트 추출)
 ```python
 import sys, os
-sys.path.insert(0, os.path.expanduser('~/.claude/skills/hwp/scripts'))
-from hwp_utils import read_hwp
+sys.path.insert(0, os.path.expanduser('~/.claude/skills/assidocs-hwp/scripts'))
+from hwp_roundtrip import roundtrip_hwp, verify_roundtrip
 
-doc = read_hwp("input.hwp")
+# 단순 라운드트립 (원본 그대로 복사)
+result = roundtrip_hwp("input.hwp", "output.hwp")
+# result = {'success': True, 'sections': 2, 'replaced': 0, 'error': None}
 
-# 전체 텍스트
-text = doc.extract_all_text()
-
-# 구조화된 텍스트 (레코드 레벨 정보 포함)
-items = doc.extract_text()
-for item in items:
-    print(f"[L{item['level']}] {item['text']}")
-```
-
-### HWP 쓰기 (새 문서 생성)
-```python
-from hwp_utils import read_hwp, create_survey_hwp
-
-# 방법 1: 원본에서 설문 내용만 추출하여 새 파일 생성
-create_survey_hwp("original.hwp", "output.hwp")
-
-# 방법 2: 원본 템플릿 + 사용자 지정 텍스트
-create_survey_hwp("original.hwp", "output.hwp", content_lines=[
-    "설문 제목",
-    "1. 첫 번째 질문",
-    "① 보기 1",
-    "② 보기 2",
-])
-
-# 방법 3: 직접 조작
-doc = read_hwp("template.hwp")
-doc.replace_body_text(["문단1", "문단2", "문단3"])
-doc.save("output.hwp")
-```
-
-### 테이블 셀 수정 (핵심 기능)
-
-원본 HWP의 레이아웃/서식을 그대로 유지하면서 특정 셀의 텍스트만 수정하는 방법입니다.
-
-#### 1단계: 레코드 구조 분석
-```python
-import struct
-from hwp_utils import read_hwp, parse_records, decode_para_text, TAG_PARA_TEXT, TAG_PARA_HEADER
-
-doc = read_hwp("input.hwp")
-records = parse_records(doc.sections[0])
-
-# 모든 레코드 덤프
-for i, rec in enumerate(records):
-    tag_name = {66:'PARA_HDR',67:'PARA_TXT',68:'CHAR_SHP',69:'LINE_SEG',
-                71:'CTRL_HDR',72:'LIST_HDR',77:'TABLE'}.get(rec.tag_id, f'TAG{rec.tag_id}')
-    txt = ''
-    if rec.tag_id == TAG_PARA_TEXT:
-        txt = repr(decode_para_text(rec.data).strip()[:60])
-    print(f"{i:4d} L{rec.level} {tag_name:10s} sz={rec.size:5d} {txt}")
-```
-
-#### 2단계: 빈 셀 찾기
-테이블에서 빈 셀은 `LIST_HDR → PARA_HDR → CHAR_SHP → LINE_SEG` 순서로 PARA_TEXT가 없는 패턴입니다.
-```python
-# 빈 셀 = PARA_HDR 바로 다음이 CHAR_SHP (PARA_TEXT 없음)
-empty_cells = []
-for i in range(len(records) - 1):
-    if (records[i].tag_id == 66 and     # PARA_HDR
-        records[i+1].tag_id == 68):      # CHAR_SHP (no PARA_TXT)
-        empty_cells.append(i)
-```
-
-#### 3단계: 빈 셀에 텍스트 삽입
-```python
-import struct
-from hwp_utils import encode_para_text, HwpRecord, TAG_PARA_TEXT, TAG_PARA_HEADER
-
-def fill_empty_cell(records, para_hdr_idx, text):
-    """빈 테이블 셀에 텍스트 삽입. bit 31 보존 필수!"""
-    text_data = encode_para_text(text)
-    n_chars = len(text) + 1  # +1 for paragraph end (\r)
-
-    # CRITICAL: bit 31 (마지막 문단 플래그) 보존
-    orig_nchars = struct.unpack('<I', records[para_hdr_idx].data[0:4])[0]
-    n_chars_with_flag = n_chars | (orig_nchars & 0x80000000)
-
-    para_hdr_data = bytearray(records[para_hdr_idx].data)
-    struct.pack_into('<I', para_hdr_data, 0, n_chars_with_flag)
-    records[para_hdr_idx] = HwpRecord(
-        records[para_hdr_idx].tag_id,
-        records[para_hdr_idx].level,
-        bytes(para_hdr_data)
-    )
-
-    new_text_rec = HwpRecord(TAG_PARA_TEXT, records[para_hdr_idx].level + 1, text_data)
-    records.insert(para_hdr_idx + 1, new_text_rec)
-    return 1  # 삽입된 레코드 수 (인덱스 시프트용)
-```
-
-#### 4단계: 기존 텍스트 수정 (체크박스, 마킹)
-```python
-def replace_in_para_text(records, rec_idx, old_str, new_str):
-    """PARA_TEXT 내 텍스트 치환. 같은 바이트 길이일 때 가장 안전."""
-    data = records[rec_idx].data
-    old_b = old_str.encode('utf-16-le')
-    new_b = new_str.encode('utf-16-le')
-    if old_b in data:
-        new_data = data.replace(old_b, new_b, 1)
-        records[rec_idx] = HwpRecord(records[rec_idx].tag_id, records[rec_idx].level, new_data)
-        # 바이트 길이가 달라지면 PARA_HDR nchars도 업데이트
-        char_diff = (len(new_data) - len(data)) // 2
-        if char_diff != 0:
-            for k in range(rec_idx - 1, -1, -1):
-                if records[k].tag_id == TAG_PARA_HEADER:
-                    hdr = bytearray(records[k].data)
-                    old_nc = struct.unpack('<I', hdr[0:4])[0]
-                    flag = old_nc & 0x80000000
-                    count = (old_nc & 0x7FFFFFFF) + char_diff
-                    struct.pack_into('<I', hdr, 0, count | flag)
-                    records[k] = HwpRecord(records[k].tag_id, records[k].level, bytes(hdr))
-                    break
-        return True
-    return False
-
-def mark_answer(records, rec_idx, marker="✔"):
-    """선택된 답변 앞에 마커 추가"""
-    rec = records[rec_idx]
-    marker_bytes = marker.encode('utf-16-le')
-    new_data = marker_bytes + rec.data
-    records[rec_idx] = HwpRecord(rec.tag_id, rec.level, new_data)
-
-    # PARA_HDR nchars 업데이트
-    for k in range(rec_idx - 1, -1, -1):
-        if records[k].tag_id == TAG_PARA_HEADER:
-            hdr = bytearray(records[k].data)
-            old_nc = struct.unpack('<I', hdr[0:4])[0]
-            flag = old_nc & 0x80000000
-            count = (old_nc & 0x7FFFFFFF) + len(marker)
-            struct.pack_into('<I', hdr, 0, count | flag)
-            records[k] = HwpRecord(records[k].tag_id, records[k].level, bytes(hdr))
-            break
-```
-
-#### 5단계: 저장 (바이너리 패치 방식 - 권장)
-
-**중요**: `olefile.write_stream`은 원본 크기 이하만 쓸 수 있고, `_ole_build`는 OLE 구조가 불완전합니다.
-**반드시 `ole_binary_patch()` 또는 `fill_table_cells()`를 사용하세요.**
-
-```python
-import zlib
-from hwp_utils import records_to_bytes, ole_binary_patch
-
-# 레코드 재조립 및 압축
-new_section = records_to_bytes(records)
-compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
-new_compressed = compressor.compress(new_section) + compressor.flush()
-
-# 바이너리 패치로 저장 (크기 증가해도 안전)
-ole_binary_patch("original.hwp", "output.hwp", "Section0", new_compressed)
-```
-
-## 테이블 빈 셀 채우기 (간편 API)
-
-```python
-from hwp_utils import fill_table_cells
-
-# {PARA_HDR 인덱스: 채울 텍스트} - 자동 역순 처리
-fill_table_cells("template.hwp", "output.hwp", {
-    120: "김태영",
-    124: "(주)인공지능팩토리",
-    128: "대표이사",
-    132: "790730-1670812",
-    136: "1002-229-065829 (우리은행)",
-    140: "대전광역시 유성구 용성로20 102동 2301호",
-    144: "김태영",
+# 텍스트 치환 포함
+result = roundtrip_hwp("input.hwp", "output.hwp", {
+    "김철수": "김태영",
+    "(주)ABC": "(주)인공지능팩토리"
 })
+
+# 검증
+vr = verify_roundtrip("input.hwp", "output.hwp", replacements)
+# vr = {'match': True, 'diffs': [], 'error': None}
 ```
 
-## 설문조사 HWP 작성 전체 예시
+### 안전한 문서 수정 패턴 (권장)
+
+HWP 수정 시 **가장 안전한 방식**은 아래 두 가지를 조합하는 것입니다:
+
+1. **빈 셀 채우기** (`fill_empty_cell`) — 빈 테이블 셀에 새 텍스트 삽입
+2. **바이트 레벨 치환** (`safe_replace`) — 기존 텍스트를 다른 텍스트로 교체
 
 ```python
 import struct, zlib
 from hwp_utils import (read_hwp, parse_records, records_to_bytes, encode_para_text,
-                        decode_para_text, HwpRecord, TAG_PARA_TEXT, TAG_PARA_HEADER,
-                        ole_binary_patch)
+                        decode_para_text, ole_binary_patch, HwpRecord, _has_extended_ctrl,
+                        TAG_PARA_TEXT, TAG_PARA_HEADER)
 
-doc = read_hwp("survey_template.hwp")
+doc = read_hwp("input.hwp")
 records = list(parse_records(doc.sections[0]))
 
-# 1. 체크박스: □ → ■ (동일 바이트 길이, 안전)
-for i, rec in enumerate(records):
-    if rec.tag_id == TAG_PARA_TEXT:
-        data = rec.data
-        for old, new in [("□ 10~50인", "■ 10~50인"), ("□ 국방 SW", "■ 국방 SW")]:
-            old_b, new_b = old.encode('utf-16-le'), new.encode('utf-16-le')
-            if old_b in data:
-                data = data.replace(old_b, new_b, 1)
-        if data != rec.data:
-            records[i] = HwpRecord(rec.tag_id, rec.level, data)
+# --- 1. 빈 셀 채우기 (bit 31 보존) ---
+def fill_empty_cell(records, para_hdr_idx, text):
+    text_data = encode_para_text(text)
+    n_chars = len(text) + 1
+    hdr = bytearray(records[para_hdr_idx].data)
+    orig_nc = struct.unpack('<I', hdr[0:4])[0]
+    flag = orig_nc & 0x80000000
+    struct.pack_into('<I', hdr, 0, n_chars | flag)
+    records[para_hdr_idx] = HwpRecord(records[para_hdr_idx].tag_id,
+                                       records[para_hdr_idx].level, bytes(hdr))
+    new_rec = HwpRecord(TAG_PARA_TEXT, records[para_hdr_idx].level + 1, text_data)
+    records.insert(para_hdr_idx + 1, new_rec)
+    return 1  # 삽입된 레코드 수
 
-# 2. 답변 마킹: ✔ 프리픽스 (nchars +1 필요)
-for idx in [233, 313, 382]:
-    mark_answer(records, idx, "✔")
+# --- 2. 바이트 레벨 치환 (확장 제어문자 스킵) ---
+def safe_replace(records, idx, old_str, new_str):
+    rec = records[idx]
+    if rec.tag_id != TAG_PARA_TEXT:
+        return False
+    if _has_extended_ctrl(rec.data):
+        return False
+    old_b = old_str.encode('utf-16-le')
+    new_b = new_str.encode('utf-16-le')
+    if old_b not in rec.data:
+        return False
+    new_data = rec.data.replace(old_b, new_b, 1)
+    char_diff = (len(new_data) - len(rec.data)) // 2
+    records[idx] = HwpRecord(rec.tag_id, rec.level, new_data)
+    if char_diff != 0:
+        for k in range(idx - 1, -1, -1):
+            if records[k].tag_id == TAG_PARA_HEADER:
+                hdr = bytearray(records[k].data)
+                old_nc = struct.unpack('<I', hdr[0:4])[0]
+                flag = old_nc & 0x80000000
+                count = (old_nc & 0x7FFFFFFF) + char_diff
+                if count < 1: count = 1
+                struct.pack_into('<I', hdr, 0, count | flag)
+                records[k] = HwpRecord(records[k].tag_id, records[k].level, bytes(hdr))
+                break
+    return True
 
-# 3. 빈 셀 채우기 (뒤에서부터 처리하여 인덱스 보존)
-for para_hdr_idx, text in [(117, "2020"), (108, "주소"), (99, "회사명")]:
-    fill_empty_cell(records, para_hdr_idx, text)
+# --- 실행 순서 ---
+# ① 빈 셀 채우기: 반드시 뒤에서부터 (인덱스 시프트 방지)
+fills = {292: '김태영', 108: '김태영', 58: '(주)인공지능팩토리'}
+for idx in sorted(fills.keys(), reverse=True):
+    fill_empty_cell(records, idx, fills[idx])
 
-# 4. 저장 (바이너리 패치 - 크기 증가해도 안전)
-new_section = records_to_bytes(records)
-compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
-new_compressed = compressor.compress(new_section) + compressor.flush()
-ole_binary_patch("survey_template.hwp", "output.hwp", "Section0", new_compressed)
+# ② 빈 셀 삽입 후 인덱스가 변경되므로 시프트 계산
+inserted = sorted(fills.keys())
+def shifted(orig_idx):
+    return orig_idx + sum(1 for k in inserted if k < orig_idx)
+
+# ③ 바이트 치환 (시프트된 인덱스 사용)
+safe_replace(records, shifted(460), 'o', 'o 내용 입력')
+
+# --- 저장 ---
+rebuilt = records_to_bytes(records)
+if doc.compressed:
+    comp = zlib.compressobj(9, zlib.DEFLATED, -15)
+    stream_data = comp.compress(rebuilt) + comp.flush()
+else:
+    stream_data = rebuilt
+ole_binary_patch("input.hwp", "output.hwp", "Section0", stream_data)
 ```
 
-## 작업 흐름
+### 저수준 API (hwp_utils)
 
-1. HWP 파일을 `read_hwp()`로 읽기
-2. `extract_text()` 또는 `extract_all_text()`로 내용 확인
-3. `parse_records()`로 레코드 구조 분석
-4. 수정 작업:
-   - 빈 셀 채우기: `fill_empty_cell()` (bit 31 보존)
-   - 체크박스 변경: `replace_in_para_text()` (□ → ■)
-   - 답변 마킹: `mark_answer()` (✔ 프리픽스)
-   - 본문 교체: `replace_body_text()` (전체 교체)
-5. 템플릿 복사 방식으로 저장 (OLE 구조 보존)
+```python
+from hwp_utils import (read_hwp, parse_records, records_to_bytes,
+                        decode_para_text, encode_para_text,
+                        ole_binary_patch, fill_table_cells,
+                        _has_extended_ctrl,
+                        HwpRecord, TAG_PARA_TEXT, TAG_PARA_HEADER)
 
-## 주의사항
+doc = read_hwp("input.hwp")
+text = doc.extract_all_text()
+records = list(parse_records(doc.sections[0]))
+```
 
-- **반드시 `ole_binary_patch()` 또는 `fill_table_cells()`로 저장**: `doc.save()`와 `olefile.write_stream`은 크기 증가 시 실패하며, `_ole_build`는 OLE 구조가 불완전하여 한글이 빈 페이지를 표시함
-- **bit 31 필수 보존**: PARA_HEADER nchars의 bit 31은 테이블 셀 마지막 문단 플래그. 누락 시 파일 손상
-- **빈 셀 삽입은 뒤에서부터**: 레코드 삽입 시 인덱스가 밀리므로 반드시 역순 처리 (`fill_table_cells`는 자동 역순)
-- **체크박스 치환은 동일 길이**: □(U+25A1)→■(U+25A0)는 바이트 길이 동일하여 안전
-- **마커 추가 시 nchars 업데이트**: 텍스트 앞에 문자 추가 시 PARA_HDR nchars도 +N
-- 암호화된 HWP 파일은 지원하지 않습니다
-- 이미지/OLE 객체는 텍스트 추출 시 무시됩니다
-- 생성된 HWP 파일은 원본의 DocInfo(폰트/스타일)를 그대로 사용합니다
+### 테이블 빈 셀 채우기 (간편 API)
+
+```python
+from hwp_utils import fill_table_cells
+
+fill_table_cells("template.hwp", "output.hwp", {
+    120: "김태영",
+    124: "(주)인공지능팩토리",
+    128: "대표이사",
+})
+```
+
+### CLI 사용
+
+```bash
+# 단순 라운드트립 + 검증
+python3 ~/.claude/skills/assidocs-hwp/scripts/hwp_roundtrip.py hwp_files/ gen_hwp/ --verify
+
+# 텍스트 치환 + 검증
+python3 ~/.claude/skills/assidocs-hwp/scripts/hwp_roundtrip.py hwp_files/ gen_hwp/ \
+  --replace replacements.json --verify
+```
+
+## 수정 작업 안전 등급
+
+| 작업 | 안전도 | 방법 |
+|------|--------|------|
+| 빈 셀에 짧은 텍스트 삽입 | ★★★ 안전 | `fill_empty_cell()` (역순 처리) |
+| 동일 길이 바이트 치환 (□→■) | ★★★ 안전 | `safe_replace()` |
+| 짧은 텍스트→짧은 텍스트 치환 | ★★☆ 보통 | `safe_replace()` + nchars 업데이트 |
+| 긴 텍스트 전체 교체 | ★☆☆ 위험 | LINE_SEG 불일치 → 글자 겹침/파일 손상 가능 |
+| 확장 제어문자 포함 레코드 수정 | ☆☆☆ 금지 | 구조 손상 → 파일 열리지 않음 |
+
+## HWPX 지원 (hwpx_utils)
+
+### 읽기 및 텍스트 추출
+
+```python
+import sys, os
+sys.path.insert(0, os.path.expanduser('~/.claude/skills/assidocs-hwp/scripts'))
+from hwpx_utils import read_hwpx
+
+doc = read_hwpx("input.hwpx")
+text = doc.extract_all_text()
+elements = doc.extract_text_elements()  # 위치 정보 포함
+```
+
+### 텍스트 치환
+
+```python
+from hwpx_utils import hwpx_replace_text
+
+result = hwpx_replace_text("input.hwpx", "output.hwpx", {
+    "김철수": "김태영",
+    "(주)ABC": "(주)인공지능팩토리"
+})
+```
+
+### 양식 채우기 (평가의견서 등)
+
+```python
+from hwpx_utils import hwpx_fill_evaluation_form
+
+result = hwpx_fill_evaluation_form(
+    src="template.hwpx",
+    out="filled.hwpx",
+    evaluator_org="AIFactory",
+    evaluator_name="김태영",
+    evaluator_title="대표이사",
+    sections_content={
+        "(중점방향1) 활용 분야별 혁신 지원": [
+            " ㅇ 첫 번째 의견",
+            " ㅇ 두 번째 의견",
+        ],
+        "(중점방향2) 초고성능컴퓨팅 자원 접근성 강화": [
+            " ㅇ 의견 내용",
+        ],
+    }
+)
+```
+
+### HWPX 수정 시 주의사항 (필독)
+
+#### linesegarray 문제 (글자 겹침 원인)
+- HWPX의 `<hp:linesegarray>`는 HWP의 LINE_SEG와 동일한 역할 — 텍스트 렌더링 레이아웃 정보
+- **텍스트를 변경하면서 기존 linesegarray를 유지하면 글자가 겹치거나 깨짐** (실제 검증 완료)
+- **해결법**: 새로 넣거나 대폭 변경하는 문단에서 `<hp:linesegarray>...</hp:linesegarray>`를 **제거**하면 한글이 열 때 자동 재계산함
+- `replace_cell_content()` 메서드가 자동으로 linesegarray를 제거하므로 안전함
+- 단순 텍스트 치환(`replace_text`)은 `<hp:t>` 내용만 바꾸므로 linesegarray에 영향 없이 안전
+
+#### HWPX 수정 안전 등급
+
+| 작업 | 안전도 | 방법 |
+|------|--------|------|
+| 짧은 텍스트 치환 (동일 길이) | ★★★ 안전 | `replace_text()` |
+| 테이블 셀 전체 교체 | ★★★ 안전 | `replace_cell_content()` (linesegarray 자동 제거) |
+| 평가의견서 등 양식 채우기 | ★★★ 안전 | `hwpx_fill_evaluation_form()` |
+| 길이 변경 치환 + linesegarray 유지 | ☆☆☆ 금지 | 글자 겹침 발생 → 반드시 linesegarray 제거 필요 |
+
+#### HWPX 포맷 요약
+
+| 항목 | 설명 |
+|------|------|
+| 형식 | ZIP 아카이브 (PK 시그니처) |
+| 본문 | `Contents/section0.xml` ~ `sectionN.xml` |
+| 텍스트 | `<hp:t>텍스트</hp:t>` (UTF-8, XML 이스케이프) |
+| 문단 | `<hp:p>` — paraPrIDRef로 스타일 참조 |
+| 글자 속성 | `<hp:run charPrIDRef="N">` — 글자 모양 참조 |
+| 레이아웃 | `<hp:linesegarray>` — 줄별 렌더링 위치 (수정 시 제거 권장) |
+| 테이블 | `<hp:tbl>` → `<hp:tr>` → `<hp:tc>` → `<hp:subList>` → `<hp:p>` |
+| 컬럼 설정 | `<hp:ctrl><hp:colPr>` — 첫 문단에 포함, 수정 시 보존 필수 |
+
+## 제한사항
+
+- **암호화된 HWP/HWPX**는 지원하지 않음
+- **손상된 zlib 데이터**가 있는 파일은 읽기 불가
+- 이미지/OLE 객체는 텍스트 추출 시 무시됨
+- **비압축(uncompressed) HWP**도 정상 처리 (자동 감지)
+
+## 저장 방식
+
+**반드시 `ole_binary_patch()`를 사용**하여 저장합니다:
+- 원본 OLE 구조를 바이너리 레벨에서 직접 패치
+- DIFAT 체인 지원 (대용량 파일 7MB+)
+- 미니스트림/정규 스트림 자동 판별
+- `src == out` 인플레이스 패치 지원 (다중 섹션)
+
+**사용 금지 API:**
+- `doc.save()` — orig_compressed 캐시 버그로 수정 내용 유실
+- `olefile.write_stream` — 원본 크기 초과 시 무시됨
+- `_ole_build()` — OLE 구조 불완전 → 한글이 빈 페이지 표시
+
+## HWP 포맷 요약
+
+| 항목 | 설명 |
+|------|------|
+| 형식 | OLE Compound File (MS-CFB) |
+| 본문 | `BodyText/Section0..N`, zlib 압축 (wbits=-15) |
+| 레코드 | 4byte 헤더: tag(10) \| level(10) \| size(12) |
+| PARA_TEXT | UTF-16LE + 확장 제어문자 (16바이트) |
+| PARA_HEADER nchars | bit 0~30: 글자 수, **bit 31: 셀 마지막 문단 플래그** |
+| PARA_CHAR_SHAPE | (position, charShapeId) 쌍의 배열. 스타일 범위 지정 |
+| PARA_LINE_SEG | 36byte/줄. 한글이 렌더링 시 사용하는 레이아웃 정보 |
+
+## 텍스트 수정 시 주의사항 (필독)
+
+### 1. 확장 제어문자 금지
+PARA_TEXT에 0x0001~0x0017 범위의 확장 제어문자(16바이트)가 있으면 **절대 치환 금지**.
+`_has_extended_ctrl(rec.data)`로 반드시 확인. 치환 시 구조 손상 → 파일이 열리지 않음.
+
+### 2. LINE_SEG 주의
+- LINE_SEG(tag 69)는 36바이트/줄 구조로 한글의 텍스트 렌더링 레이아웃을 담당
+- 텍스트 길이를 **대폭 변경**하면(예: 3자 → 100자) LINE_SEG와 불일치 → 글자 겹침 또는 파일 손상
+- **안전한 접근**: 텍스트 길이 변경을 최소화하는 바이트 치환(`safe_replace`) 사용
+- **위험한 접근**: `replace_para_text()`로 전체 텍스트 교체 시 `update_line_seg()`가 호출되나, 실제 한글 렌더링과 100% 일치하지 않아 파일 손상 가능성 있음
+
+### 3. nchars bit 31 보존
+테이블 셀의 마지막 문단 플래그(0x80000000) 필수 보존. 누락 시 한글이 후속 레코드를 잘못 파싱 → 파일 손상.
+
+### 4. 빈 셀 삽입 순서
+빈 셀에 레코드를 삽입하면 이후 인덱스가 밀림. **반드시 뒤에서부터(역순)** 처리.
+이미 삽입한 후 바이트 치환할 때는 `shifted()` 함수로 인덱스 보정 필요.
+
+### 5. 검증 필수
+수정 후 반드시 `read_hwp()`로 다시 읽어 `extract_all_text()`로 내용 확인.
+주요 키워드가 포함되어 있는지 assert로 체크.

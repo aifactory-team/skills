@@ -648,8 +648,9 @@ def ole_binary_patch(src_path: str, out_path: str, stream_name: str, new_data: b
     def sect_off(sid):
         return 512 + sid * SECTOR_SIZE
 
-    # 원본 복사
-    shutil.copy2(src_path, out_path)
+    # 원본 복사 (src와 out이 같으면 in-place 패치)
+    if os.path.abspath(src_path) != os.path.abspath(out_path):
+        shutil.copy2(src_path, out_path)
     with open(out_path, 'rb') as f:
         filedata = bytearray(f.read())
 
@@ -930,6 +931,111 @@ def _patch_regular_stream(filedata, fat, fat_sect_ids, dir_data, dir_chain,
     for k, sid in enumerate(dir_chain):
         off = sect_off(sid)
         filedata[off:off + SECTOR_SIZE] = dir_data[k * SECTOR_SIZE:(k + 1) * SECTOR_SIZE]
+
+
+def _has_extended_ctrl(data: bytes) -> bool:
+    """PARA_TEXT 데이터에 확장 제어문자(16바이트)가 있는지 확인"""
+    pos = 0
+    while pos < len(data) - 1:
+        ch = struct.unpack('<H', data[pos:pos + 2])[0]
+        if ch in EXTENDED_CTRL_CHARS:
+            return True
+        pos += 2
+    return False
+
+
+def update_line_seg(records: list, text_idx: int, new_char_count: int):
+    """PARA_TEXT 치환 후 LINE_SEG를 새 텍스트 길이에 맞게 업데이트.
+
+    텍스트 길이가 크게 변경되면 LINE_SEG의 줄 수가 맞지 않아
+    한글에서 글자가 겹쳐 보이는 현상이 발생합니다.
+    이 함수는 LINE_SEG를 적절한 줄 수로 재생성합니다.
+    """
+    for j in range(text_idx + 1, min(text_idx + 5, len(records))):
+        if records[j].tag_id != TAG_PARA_LINE_SEG:
+            continue
+        ls_data = records[j].data
+        if len(ls_data) < 36:
+            break
+
+        seg0 = bytearray(ls_data[:36])
+        seg_width = struct.unpack('<i', seg0[28:32])[0]
+
+        # 줄당 글자 수 추정 (한글 기준 ~890 HWP units/char)
+        chars_per_line = max(seg_width // 890, 15)
+        n_lines = max(1, (new_char_count + chars_per_line - 1) // chars_per_line)
+
+        old_n_lines = len(ls_data) // 36
+        if n_lines <= old_n_lines:
+            break  # 줄 수가 줄거나 같으면 업데이트 불필요
+
+        # 줄 간격 계산
+        y0 = struct.unpack('<i', seg0[4:8])[0]
+        line_h = struct.unpack('<i', seg0[8:12])[0]
+        if len(ls_data) >= 72:
+            y1 = struct.unpack('<i', ls_data[40:44])[0]
+            line_advance = y1 - y0
+        else:
+            line_advance = max(line_h + 660, 1760)  # 기본 줄 간격
+
+        # 새 LINE_SEG 생성
+        TAG_NORMAL = 393216    # 0x60000
+        TAG_LAST = 1441792     # 0x160000
+        new_ls = bytearray()
+        for line in range(n_lines):
+            seg = bytearray(seg0)
+            struct.pack_into('<I', seg, 0, min(line * chars_per_line, new_char_count))
+            struct.pack_into('<i', seg, 4, y0 + line * line_advance)
+            struct.pack_into('<I', seg, 32, TAG_NORMAL if line < n_lines - 1 else TAG_LAST)
+            new_ls.extend(seg)
+
+        records[j] = HwpRecord(TAG_PARA_LINE_SEG, records[j].level, bytes(new_ls))
+        break
+
+
+def replace_para_text(records: list, idx: int, new_text: str) -> bool:
+    """PARA_TEXT 레코드의 텍스트를 치환하고 PARA_HEADER nchars + LINE_SEG를 업데이트.
+
+    확장 제어문자가 포함된 레코드는 건너뜁니다 (구조 손상 방지).
+
+    Args:
+        records: 레코드 리스트
+        idx: PARA_TEXT 레코드 인덱스
+        new_text: 새 텍스트
+
+    Returns:
+        True면 치환 성공, False면 건너뜀
+    """
+    rec = records[idx]
+    if rec.tag_id != TAG_PARA_TEXT:
+        return False
+    if _has_extended_ctrl(rec.data):
+        return False
+
+    new_data = encode_para_text(new_text)
+    old_data = rec.data
+    char_diff = (len(new_data) - len(old_data)) // 2
+    new_char_count = len(new_data) // 2
+
+    records[idx] = HwpRecord(rec.tag_id, rec.level, new_data)
+
+    # PARA_HEADER nchars 업데이트 (bit 31 보존)
+    if char_diff != 0:
+        for k in range(idx - 1, -1, -1):
+            if records[k].tag_id == TAG_PARA_HEADER:
+                hdr = bytearray(records[k].data)
+                old_nc = struct.unpack('<I', hdr[0:4])[0]
+                flag = old_nc & 0x80000000
+                count = (old_nc & 0x7FFFFFFF) + char_diff
+                if count < 1:
+                    count = 1
+                struct.pack_into('<I', hdr, 0, count | flag)
+                records[k] = HwpRecord(records[k].tag_id, records[k].level, bytes(hdr))
+                break
+
+    # LINE_SEG 업데이트 (글자 겹침 방지)
+    update_line_seg(records, idx, new_char_count)
+    return True
 
 
 def fill_table_cells(src_path: str, out_path: str, cell_data: dict):
